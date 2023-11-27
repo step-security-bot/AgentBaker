@@ -5,7 +5,7 @@ package nbcontract.v1;
 // illustrative division only
 message Configuration {
   // System Configuration
-  
+  bool DisableCustomData = ;
   string cluster_certificate_authority = 1;
 
   // only required until Secure TLS bootstrapping in place
@@ -14,17 +14,17 @@ message Configuration {
 
   // cluster/user config
   string kubernetes_version = 3; // Q: can this be auto-detected? Or is this part of specifying the desired node version?
-  string kube_binary_url = 4;      // maybe we can combine this and custom_kube_binary_url later once we figure out the logic of how they are used.
+  //string kube_binary_url = 4;      we should remove this kube_binary_url because it's mostly getting the value from kubernetesConfig.CustomKubeBinaryURL. But need to double check on the scripts side if CUSTOM_KUBE_BINARY_URL is not provided with a value, what default value will the KUBE_BINARY_URL be.
   string custom_kube_binary_url = 5;
-  string kubeproxy_url = 6;
+  string kubeproxy_url = 6; //from kubernetesConfig.CustomKubeProxyImage
   ApiServerConfig apiserver_config = 7;
   string subscription_id = 8;
   string resource_group = 9;
   string location = 10;
-  string vm_type = 11;  
+  string vm_type = 11;  //either string "vmss" or "standard". Although it's calculated from Properties.AgentPoolProfiles, it seems better to just use this single variable as contract instead of an array of AgentPoolProfiles
   
-  string primary_availability_set = 12;
-  string primary_scale_set = 13;
+  // string primary_availability_set = 12; removed as this can be calculated from vars AgentPoolProfiles.Size (but Karpenter probably doesn't have this), Name and AvailabilityProfile. Need to ensure ClusterID is generated before this.
+  string primary_scale_set = 13; //this comes from NBC directly
   
   CloudProviderConfig cloud_provider_config = 14;
   IdentityConfiguration identity_configuration = 15;
@@ -32,36 +32,38 @@ message Configuration {
   RuncConfig runc_config = 16;
 
   // ... and a bunch of user-specified config
-  string repo_depot_endpoint = 17;
-  string linux_admin_username = 18;
-  string tenant_id = 19;
-  bool use_instance_metadata = 20;
-  LoadBalancerConfig load_balancer_config = 21;
+  string RepoDepotEndpoint = 17;
+  // initAKSCustomCloudFilepath is a const defined in const.go. We can move it to the GO binary. I don't understand why it's related to this. https://github.com/Azure/AgentBaker/blob/72d89371f4c90f45888068539cd15aadc4f52a8b/pkg/agent/variables.go#L57C2-L64C3
+  string LinuxAdminUsername = 18;
+  string TenantId = 19;
+  bool UseInstanceMetadata = 20;
+  LoadBalancerConfig LoadBalancerConfig = 21;
   ContainerdConfig containerd_config = 22;
-  bool is_vhd = 23;
+  AgentPoolProfile AgentPoolProfile = 23;
+  // bool is_vhd = 23; removed because it only depends on AgentPoolProfile.Distro
   GpuConfig gpu_config = 24;
-  bool is_sgx_node = 25;
+  // bool is_sgx_node = 25; //removed as it only depends on var AgentPoolProfile.VmSize
   TeleportConfig teleport_config = 26;
   HttpProxyConfig http_proxy_configuration = 27;
-  FeatureState ssh_status = 28;
+  FeatureState SshStatus = 28;
   FeatureState unattended_upgrade_status = 29;
   string message_of_the_day = 30;
   string swap_file_size_mb = 31;
   KubeletConfiguration kubelet_configuration = 32;
   FeatureState hosts_config_agent_status = 33;
   CustomCaTrustConfig custom_ca_trust_config = 34;
-  string provision_output = 35;
-  string hyperkube_url = 36; //will be removed later
-  string moby_version = 37; //will be removed later
-  string container_runtime = 38; //will be removed later
-  string cli_tool = 39;  //will be removed later
-  bool needs_containerd = 40; //will be removed later
-  bool is_krustlet = 41; //can be removed, this only depends on workload runtime, which is a better contract input
+  //string provision_output = 35; removed. const should be defined in the go binary.
+  //string hyperkube_url = 36;  removed
+  //string moby_version = 37; removed
+  // string container_runtime = 38;removed
+  //string cli_tool = 39; removed
+  // bool needs_containerd = 40; removed
+  //bool is_krustlet = 41; removed, it only depends on var AgentPoolProfile.WorkloadRuntime
   bool needs_docker_login = 42; //useless, will remove
   FeatureState ipv6_dual_stack_enabled = 43; //seems very specific to RP, discuss with Alex wrt Karpenter
-  string outbound_command = 44; //this is const depending on cloud, can be removed later with smart refactoring
+  //string outbound_command = 44; removed. It depends on var AzureEnvironmentSpecConfig.CloudName and IsAKSCustomCloud. IsAKSCustomCloud is not in the contract because it's calculatable.
   bool enable_unattended_upgrade = 45; //seems the current API is messed up with naming, fix soon
-  bool ensure_no_dupe_promiscuous_bridge = 46; //this is little weird, check cse_cmd.sh for actual condition
+  bool ensure_no_dupe_promiscuous_bridge = 46; //this is little weird, check cse_cmd.sh for actual condition. Devin: can be removed because it only depends on HasCalicoNetworkPolicy, which depends on NetworkPolicy that is already in the contract
   CustomSearchDomain custom_search_domain = 47;
   CustomLinuxOSConfig custom_linux_os_config = 48;
 
@@ -101,12 +103,13 @@ enum FeatureState {
   FEATURE_STATE_DISABLED = 2;
 }
 
+//these seem all from datamodel
 message IdentityConfiguration {
-  IdentityType identity_type = 1; // Q: I am assuming this is a better pattern than Oneof?
-  string service_principal_id = 2;
-  string service_principal_secret = 3;
-  string assigned_identity_id = 4;  //could be user or system assigned, depending on the type
-  string use_managed_identity_extension = 5;
+  IdentityType IdentityType = 1; // Q: I am assuming this is a better pattern than Oneof?
+  string ServicePrincipalId = 2;
+  string ServicePrincipalSecret = 3;
+  string AssignedIdentityId = 4;  //could be user or system assigned, depending on the type
+  // string use_managed_identity_extension = 5; removed as it's included in IdentityType
 }
 
 enum IdentityType {
@@ -131,19 +134,18 @@ enum NetworkPolicyType {
 }
 
 message HttpProxyConfig {
-  optional string http_proxy = 1;
-  optional string https_proxy = 2;
-  repeated string no_proxy = 3;
-  optional string trusted_certificate_authority = 4;
-  FeatureState http_proxy_config_status = 5;
-  FeatureState http_proxy_ca_config_status = 6;
-  string http_proxy_trusted_ca = 7;
+  optional string HttpProxy = 1; //we don't need to put optional because proto3 assumes all are optional by default. "Required" is not allowed too.
+  optional string HttpsProxy = 2;
+  repeated string NoProxy = 3;
+  optional string TrustedCA = 4;
+  //FeatureState http_proxy_config_status = 5; removed since the previous 4 vars should allow us to calculate this
+  //FeatureState http_proxy_ca_config_status = 6; removed since the previous 4 vars should allow us to calculate this
 }
 
-message CustomCaTrustConfig {
-  FeatureState custom_ca_trust_status = 1;
-  int32 custom_ca_trust_count = 2;
-  repeated string custom_ca_certs = 3;
+message CustomCATrustConfig {
+  //FeatureState custom_ca_trust_status = 1; removed since we can calculate from var CustomCATrustCerts. Check GetCustomCATrustConfigCerts in baker.go
+  //int32 custom_ca_trust_count = 2;removed since we can calculate from var CustomCATrustCerts. Check GetCustomCATrustConfigCerts in baker.go
+  repeated string CustomCATrustCerts = 3;
 }
 
 enum KubeletDiskType {
@@ -158,37 +160,41 @@ message Taint {
 }
 
 message VirtualNetworkConfig {
-  string name = 1;
-  string resource_group = 2;
+  // string name = 1;  Removed this. This can be calculated from var AgentPoolProfiles.AreCustomVnet, AgentPoolProfiles.VnetSubnetId and var AKSClusterProperties.K8sOrchestratorName. Need to ensure ClusterID is generated before this.
+  
+  //removed this because we can calculte it from var AgentPoolProfiles.AreCustomVnet and var AgentPoolProfiles.VnetSubnetId. See GetVNetResourceGroupName() in types.go. However Karpenter probably doesn't have AgentPoolProfiles.
+  //string resource_group = 2; 
+  string VnetCniPluginsUrl = 1;
 }
 
+// all are from datamodel.KubernetesConfig directly
 message CloudProviderConfig {
-  CloudProviderBackoffConfig cloud_provider_backoff_config = 1;
-  CloudProviderRateLimitConfig cloud_provider_rate_limit_config = 2;
-  bool cloud_provider_disable_out_bound_snat = 3;
+  CloudProviderBackoffConfig CloudProviderBackoffConfig = 1;
+  CloudProviderRateLimitConfig CloudProviderRateLimitConfig = 2;
+  bool CloudProviderDisableOutboundSNAT = 3;
 }
 
 message CloudProviderBackoffConfig {
-  FeatureState status = 1;
-  string mode = 2;
-  int32 retries = 3;
-  double exponent = 4;
-  int32 duration = 5;
-  double jitter = 6;
+  FeatureState Status = 1;
+  string Mode = 2;
+  int32 Retries = 3;
+  double Exponent = 4;
+  int32 Duration = 5;
+  double Jitter = 6;
 }
 
 message CloudProviderRateLimitConfig {
-  FeatureState status = 1;
-  double qps = 2;
-  double qps_write = 3;
-  int32 bucket = 4;
-  int32 bucket_write = 5;  
+  FeatureState Status = 1;
+  double Qps = 2;
+  double QpsWrite = 3;
+  int32 Bucket = 4;
+  int32 BucketWrite = 5;  
 }
 
 message LoadBalancerConfig {
-  LoadBalancerSku load_balancer_sku = 1;
-  bool exclude_master_from_standard_load_balancer = 2;
-  int32 max_load_balancer_rule_count = 3;
+  LoadBalancerSku Sku = 1;
+  // bool exclude_master_from_standard_load_balancer = 2; removed as this is always true in variables.go
+  int32 MaxRuleCount = 2;
 }
 
 enum LoadBalancerSku {
@@ -204,25 +210,25 @@ enum NetworkMode {
 }
 
 message ApiServerConfig {
-  string apiserver_public_key = 1;
-  string apiserver_name = 2;
-  string api_server_endpoint = 3;
+  string PublicKey = 1; // from certificateProfile.APIServerCertificate
+  // string Name = 2; removed as it can be calculated from HostedMasterProfile, see GetKubernetesEndpoint in baker.go. Need to check if Karpenter has HostedMasterProfile.
+  // string api_server_endpoint = 3;  //duplicate with Name
 }
 
 message GpuConfig {
-  FeatureState status = 1;
-  FeatureState is_mig_node = 2;
+  FeatureState status = 1; 
+  //FeatureState is_mig_node = 2; removed. Can be calculated from gpu_instance_profile. Check IsMIGNode()
   FeatureState config_gpu_driver_if_needed = 3;    //we can revise this name later when we clearly understand what it's doing
   FeatureState enable_gpu_device_plugin_if_needed = 4; //we can revise this name later when we clearly understand what it's doing
-  FeatureState fabric_manager_status = 5;  //consider just extracting vm_size since both GPUNeedsFabricManager and getGPUDriverVersion are just depending ont vm_size.
-  string gpu_driver_version = 6; // this is dependent only on VM size, can be calculated on the VHD
+  //FeatureState fabric_manager_status = 5;  removed. Only depends on var AgentPoolProfile.VmSize.
+  // string gpu_driver_version = 6; removed. this is dependent only on VM size, can be calculated on the VHD
   string gpu_instance_profile = 7;
 }
 
 message ContainerdConfig {
-  string containerd_download_url_base = 1;
-  string containerd_version = 2;
-  string containerd_package_url = 3;
+  string DownloadUrlBase = 1;
+  string Version = 2;
+  string PackageUrl = 3;
 }
 
 message TeleportConfig {
@@ -236,15 +242,17 @@ message RuncConfig {
 }
 
 message NetworkConfig {
-  NetworkPluginType network_plugin = 1;
-  NetworkPolicyType network_policy = 2;
+  NetworkPluginType network_plugin = 1; //from datamodel.KubernetesConfig directly
+  NetworkPolicyType network_policy = 2; //from datamodel.KubernetesConfig directly
   NetworkMode network_mode = 3;
-  string network_security_group = 4;
-  VirtualNetworkConfig virtual_network_config = 5;
-  string vnet_cni_plugins_url = 6;
-  string cni_plugins_url = 7;
-  string subnet = 8;
-  string route_table = 9;
+  //string network_security_group = 4;  similar to subnet, should be able to removed. We can calculte it from AKSClusterProperties.K8sOrchestratorName and AgentPoolProfiles.VnetSubnetId. See GetSubnetName() in types.go. But need to make sure ClusterID is generated before this. 
+  //(Devin To Anuj: it seems weird to me a get function GetClusterID() is writing to HostedMasterProfile. See if we want to fix it now or later)
+
+  VirtualNetworkConfig VirtualNetworkConfig = 5;
+  string CniPluginsUrl = 6;
+  
+  //string subnet = 8; removed this because we can calculte it from AKSClusterProperties.K8sOrchestratorName and AgentPoolProfiles.VnetSubnetId. See GetSubnetName() in types.go
+  //string route_table = 9; similar to subnet, should be able to removed. Need to ensure ClusterID is generated before this.
 }
 
 message CustomSearchDomain {
@@ -276,10 +284,12 @@ message TLSBootstrapping {
 }
 
 message CustomCloudConfig {
-  string target_environment = 1;
-  string target_cloud = 2;  // can probably get rid of this, analyze more
-  bool is_custom_cloud = 3;
+  //string target_environment = 1;  removed. duplicate with target_cloud
+  // string TargetCloud = 2;   removed as it only depends on var location.
+  //bool is_custom_cloud = 3; removed. IsAKSCustomCloud can be calculated from var Name below
   string custom_env_json_content = 4; // can be generated on the VHD, also rename
+  string Name = 5; //IsAKSCustomCloud can be calculated from cs.Properties.CustomCloudEnv.Name
+  string Location = 6;  //GetTargetEnvironment only depends on location
 }
 
 message SysctlConfig {
@@ -316,4 +326,29 @@ message SysctlConfig {
 message UlimitConfig {
   optional string NoFile = 1;
   optional string MaxLockedMemory = 2; 
+}
+
+message AgentPoolProfile {
+  bool AreCustomVnet = 1;  //see AreAgentProfilesCustomVNET() in types.go. However Karpenter probably doesn't have AgentPoolProfiles.
+  int32 ProfileSize = 2; //GetPrimaryAvailabilitySetName() in types.go checks this. We may be able to consolidate with other variables
+  string VnetSubnetId = 3;  //this will be from AgentPoolProfiles[0].VnetSubnetID. However Karpenter probably doesn't have AgentPoolProfiles.
+  string Name = 4;  //GetClusterID() depends on AgentPoolProfiles[0].Name. 
+  string Distro = 5;  //isVHD depends on it
+  string VmSize = 6;  //sgxNode depends on it
+  WorkloadRuntime WorkloadRuntime = 7;  //IsKrustlet depends on it. WorkloadRuntime is actually just a string type
+
+}
+
+message AKSClusterProperties {
+  string K8sOrchestratorName = 1;  // if we can resolve its dependency p.OrchestratorProfile.IsKubernetes(), we can also remove this.
+
+}
+
+message HostedMasterProfile {
+  string IPAddress = 1;
+  string FQDN = 2;
+}
+
+message AzureEnvironmentSpecConfig {
+  string CloudName = 1; //GetOutboundCommand depends on this
 }

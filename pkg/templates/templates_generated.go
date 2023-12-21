@@ -7395,6 +7395,7 @@ param(
 )
 # Do not parse the start time from $LogFile to simplify the logic
 $StartTime=Get-Date
+$cseFormattedStartTime=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff")
 $global:ExitCode=0
 $global:ErrorMessage=""
 
@@ -7543,6 +7544,8 @@ Expand-Archive scripts.zip -DestinationPath "C:\\AzureData\\"
 . c:\AzureData\windows\windowscsehelper.ps1
 # util functions only can be used after this line, for example, Write-Log
 
+$global:OperationId = New-Guid
+
 try
 {
     Write-Log ".\CustomDataSetupScript.ps1 -MasterIP $MasterIP -KubeDnsServiceIp $KubeDnsServiceIp -MasterFQDNPrefix $MasterFQDNPrefix -Location $Location -AADClientId $AADClientId -NetworkAPIVersion $NetworkAPIVersion -TargetEnvironment $TargetEnvironment"
@@ -7568,12 +7571,15 @@ try
         $global:CSEScriptsPackageUrl = $global:CSEScriptsPackageUrl + $WindowsCSEScriptsPackage
         Write-Log "CSEScriptsPackageUrl is set to $global:CSEScriptsPackageUrl"
     }
+
     # Download CSE function scripts
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.DownloadAndExpandCSEScriptPackageUrl" -EventMessage "Start to get CSE scripts. CSEScriptsPackageUrl: $global:CSEScriptsPackageUrl"
     Write-Log "Getting CSE scripts"
     $tempfile = 'c:\csescripts.zip'
     DownloadFileOverHttp -Url $global:CSEScriptsPackageUrl -DestinationPath $tempfile -ExitCode $global:WINDOWS_CSE_ERROR_DOWNLOAD_CSE_PACKAGE
     Expand-Archive $tempfile -DestinationPath "C:\\AzureData\\windows"
     Remove-Item -Path $tempfile -Force
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.DownloadAndExpandCSEScriptPackageUrl"  -IsClearTaskName $true
 
     # Dot-source cse scripts with functions that are called in this script
     . c:\AzureData\windows\azurecnifunc.ps1
@@ -7588,22 +7594,33 @@ try
     $sshEnabled = [System.Convert]::ToBoolean("{{ WindowsSSHEnabled }}")
 
     if ( $sshEnabled ) {
+        Logs-To-Start-Event -TaskName "AKS.WindowsCSE.InstallOpenSSH" -EventMessage "Start to install OpenSSH"
         Write-Log "Install OpenSSH"
         Install-OpenSSH -SSHKeys $SSHKeys
+        Logs-To-End-Event -TaskName "AKS.WindowsCSE.InstallOpenSSH" -IsClearTaskName $true
     }
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.SetTelemetrySetting" -EventMessage "Start to apply telemetry data setting. WindowsTelemetryGUID: $global:WindowsTelemetryGUID"
     Write-Log "Apply telemetry data setting"
     Set-TelemetrySetting -WindowsTelemetryGUID $global:WindowsTelemetryGUID
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.SetTelemetrySetting" -IsClearTaskName $true
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.ResizeOSDrive" -EventMessage "Start to resize os drive if possible"
     Write-Log "Resize os drive if possible"
     Resize-OSDrive
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.ResizeOSDrive" -IsClearTaskName $true
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.InitializeDataDisks" -EventMessage "Start to initialize data disks"
     Write-Log "Initialize data disks"
     Initialize-DataDisks
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.InitializeDataDisks" -IsClearTaskName $true
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.InitializeDataDirectories" -EventMessage "Start to create required data directories as needed"
     Write-Log "Create required data directories as needed"
     Initialize-DataDirectories
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.InitializeDataDirectories" -IsClearTaskName $true
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.GetProvisioningAndLogCollectionScripts" -EventMessage "Start to get provisioning scripts and log collection scripts"
     Create-Directory -FullPath "c:\k"
     Write-Log "Remove `+"`"+`"NT AUTHORITY\Authenticated Users`+"`"+`" write permissions on files in c:\k"
     icacls.exe "c:\k" /inheritance:r
@@ -7614,21 +7631,29 @@ try
     icacls.exe "c:\k"
     Get-ProvisioningScripts
     Get-LogCollectionScripts
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.GetProvisioningAndLogCollectionScripts" -IsClearTaskName $true
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.WriteKubeClusterConfig" -EventMessage "Start to write KubeCluster Config. WindowsPauseImageURL: $global:WindowsPauseImageURL"
     Write-KubeClusterConfig -MasterIP $MasterIP -KubeDnsServiceIp $KubeDnsServiceIp
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.WriteKubeClusterConfig" -IsClearTaskName $true    
 
     Write-Log "Download kubelet binaries and unzip"
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.DownloadKubletBinaries" -EventMessage "Start to download kubelet binaries and unzip. KubeBinariesPackageSASURL: $global:KubeBinariesPackageSASURL"
     Get-KubePackage -KubeBinariesSASURL $global:KubeBinariesPackageSASURL
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.DownloadKubletBinaries" -IsClearTaskName $true
 
     # This overwrites the binaries that are downloaded from the custom packge with binaries.
     # The custom package has a few files that are necessary for future steps (nssm.exe)
     # this is a temporary work around to get the binaries until we depreciate
     # custom package and nssm.exe as defined in aks-engine#3851.
     if ($global:WindowsKubeBinariesURL){
+        Logs-To-Start-Event -TaskName "AKS.WindowsCSE.OverwriteKubeBinaries" -EventMessage "Start to overwrite kube node binaries"
         Write-Log "Overwriting kube node binaries from $global:WindowsKubeBinariesURL"
         Get-KubeBinaries -KubeBinariesURL $global:WindowsKubeBinariesURL
+        Logs-To-End-Event -TaskName "AKS.WindowsCSE.OverwirteKubeBinaries" -IsClearTaskName $true
     }
 
+    
     Write-Log "Installing ContainerD"
     $cniBinPath = $global:AzureCNIBinDir
     $cniConfigPath = $global:AzureCNIConfDir
@@ -7636,12 +7661,18 @@ try
         $cniBinPath = $global:CNIPath
         $cniConfigPath = $global:CNIConfigPath
     }
-    Install-Containerd-Based-On-Kubernetes-Version -ContainerdUrl $global:ContainerdUrl -CNIBinDir $cniBinPath -CNIConfDir $cniConfigPath -KubeDir $global:KubeDir -KubernetesVersion $global:KubeBinariesVersion
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.InstallContainerdBasedOnKubernetesVersion" -EventMessage "Start to install ContainerD based on kubernetes version. ContainerdUrl: $global:ContainerdUrl, KubernetesVersion: $global:KubeBinariesVersion"
+    Install-Containerd-Based-On-Kubernetes-Version -ContainerdUrl $global:ContainerdUrl -CNIBinDir $cniBinPath -CNIConfDir $cniConfigPath -KubeDir $global:KubeDir -KubernetesVersion $global:KubeBinariesVersion
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.InstallContainerdBasedOnKubernetesVersion" -IsClearTaskName $true
+
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.RetagImagesForAzureChinaCloud" -EventMessage "Start to retag images for Azure China Cloud"
     Retag-ImagesForAzureChinaCloud -TargetEnvironment $TargetEnvironment
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.RetagImagesForAzureChinaCloud" -IsClearTaskName $true
 
     # For AKSClustomCloud, TargetEnvironment must be set to AzureStackCloud
     Write-Log "Write Azure cloud provider config"
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.WriteAzureCloudProviderConfig" -EventMessage "Start to write Azure Cloud Provider Config"
     Write-AzureConfig `+"`"+`
         -KubeDir $global:KubeDir `+"`"+`
         -AADClientId $AADClientId `+"`"+`
@@ -7664,6 +7695,8 @@ try
         -ExcludeMasterFromStandardLB $global:ExcludeMasterFromStandardLB `+"`"+`
         -TargetEnvironment {{if IsAKSCustomCloud}}"AzureStackCloud"{{else}}$TargetEnvironment{{end}} 
 
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.WriteAzureCloudProviderConfig" -IsClearTaskName $true
+
     # we borrow the logic of AzureStackCloud to achieve AKSCustomCloud. 
     # In case of AKSCustomCloud, customer cloud env will be loaded from azurestackcloud.json 
     {{if IsAKSCustomCloud}}
@@ -7675,20 +7708,26 @@ try
     {{end}}
 
     Write-Log "Write ca root"
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.WriteCACert" -EventMessage "Start to write CA certifacte"
     Write-CACert -CACertificate $global:CACertificate `+"`"+`
         -KubeDir $global:KubeDir
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.WriteCACert" -IsClearTaskName $true
 
     if ($global:EnableCsiProxy) {
+        Logs-To-Start-Event -TaskName "AKS.WindowsCSE.StartCsiProxyService" -EventMessage "Start Csi proxy service. CsiProxyUrl: $global:CsiProxyUrl"
         New-CsiProxyService -CsiProxyPackageUrl $global:CsiProxyUrl -KubeDir $global:KubeDir
+        Logs-To-End-Event -TaskName "AKS.WindowsCSE.StartCsiProxyService" -IsClearTaskName $true
     }
 
     if ($global:TLSBootstrapToken) {
         Write-Log "Write TLS bootstrap kubeconfig"
+        Logs-To-Start-Event -TaskName "AKS.WindowsCSE.WriteBootstrapKubeConfig" -EventMessage "Start to write TLS bootstrap kubeconfig"
         Write-BootstrapKubeConfig -CACertificate $global:CACertificate `+"`"+`
             -KubeDir $global:KubeDir `+"`"+`
             -MasterFQDNPrefix $MasterFQDNPrefix `+"`"+`
             -MasterIP $MasterIP `+"`"+`
             -TLSBootstrapToken $global:TLSBootstrapToken
+        Logs-To-End-Event -TaskName "AKS.WindowsCSE.WriteBootstrapKubeConfig" -IsClearTaskName $true
 
         # NOTE: we need kubeconfig to setup calico even if TLS bootstrapping is enabled
         #       This kubeconfig will deleted after calico installation.
@@ -7698,29 +7737,38 @@ try
         Write-Log "Write kube config"
     }
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.WriteKubeConfig" -EventMessage "Start to write kube config"
     Write-KubeConfig -CACertificate $global:CACertificate `+"`"+`
         -KubeDir $global:KubeDir `+"`"+`
         -MasterFQDNPrefix $MasterFQDNPrefix `+"`"+`
         -MasterIP $MasterIP `+"`"+`
         -AgentKey $AgentKey `+"`"+`
         -AgentCertificate $global:AgentCertificate
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.WriteKubeConfig" -IsClearTaskName $true
 
     if ($global:EnableHostsConfigAgent) {
         Write-Log "Starting hosts config agent"
+        Logs-To-Start-Event -TaskName "AKS.WindowsCSE.StartHostConfigService" -EventMessage "Start hosts config agent"
         New-HostsConfigService
+        Logs-To-End-Event -TaskName "AKS.WindowsCSE.StartHostConfigService" -IsClearTaskName $true
     }
 
     Write-Log "Configuring networking with NetworkPlugin:$global:NetworkPlugin"
 
     # Configure network policy.
+    Logs-To-Start-Event "ASK.WindowsCSE.GetAndImportHNSModule" -EventMessage "Start to get and import hns module. NetworkPlugin: $global:NetworkPlugin"
     Get-HnsPsm1 -HNSModule $global:HNSModule
     Import-Module $global:HNSModule
+    Logs-To-End-Event "AKS.WindowsCSE.GetAndImportHNSModule" -IsClearTaskName $true
 
     Write-Log "Installing Azure VNet plugins"
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.InstallVnetPlugins" -EventMessage "Start to install Azure VNet plugins. VnetCNIPluginsURL: $global:VNetCNIPluginsURL"
     Install-VnetPlugins -AzureCNIConfDir $global:AzureCNIConfDir `+"`"+`
         -AzureCNIBinDir $global:AzureCNIBinDir `+"`"+`
         -VNetCNIPluginsURL $global:VNetCNIPluginsURL
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.InstallVnetPlugins" -IsClearTaskName $true
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.SetAzureCNIConfig" -EventMessage "Start to set Azure CNI config. IsDualStackEnabled: $global:IsDualStackEnabled, IsAzureCNIOverlayEnabled: $global:IsAzureCNIOverlayEnabled, IsDisableWindowsOutboundNat: $global:IsDisableWindowsOutboundNat"
     Set-AzureCNIConfig -AzureCNIConfDir $global:AzureCNIConfDir `+"`"+`
         -KubeDnsSearchPath $global:KubeDnsSearchPath `+"`"+`
         -KubeClusterCIDR $global:KubeClusterCIDR `+"`"+`
@@ -7728,8 +7776,10 @@ try
         -VNetCIDR $global:VNetCIDR `+"`"+`
         -IsDualStackEnabled $global:IsDualStackEnabled `+"`"+`
         -IsAzureCNIOverlayEnabled $global:IsAzureCNIOverlayEnabled
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.SetAzureCNIConfig" -IsClearTaskName $true
 
     if ($TargetEnvironment -ieq "AzureStackCloud") {
+        Logs-To-Start-Event -TaskName "AKS.WindowsCSE.GenerateAzureStackCNIConfig" -EventMessage "Start to generate Azure Stack CNI config"
         GenerateAzureStackCNIConfig `+"`"+`
             -TenantId $global:TenantId `+"`"+`
             -SubscriptionId $global:SubscriptionId `+"`"+`
@@ -7740,28 +7790,49 @@ try
             -NetworkAPIVersion $NetworkAPIVersion `+"`"+`
             -AzureEnvironmentFilePath $([io.path]::Combine($global:KubeDir, "azurestackcloud.json")) `+"`"+`
             -IdentitySystem "{{ GetIdentitySystem }}"
+        Logs-To-End-Event -TaskName "AKS.WindowsCSE.GenerateAzureStackCNIConfig" -IsClearTaskName $true
     }
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.NewExternalHnsNetwork" -EventMessage "Start to create new external hns network"
     New-ExternalHnsNetwork -IsDualStackEnabled $global:IsDualStackEnabled
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.NewExternalHnsNetwork" -IsClearTaskName $true
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.InstallKubernetesServices" -EventMessage "Start to install kubernetes services"
     Install-KubernetesServices `+"`"+`
         -KubeDir $global:KubeDir
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.InstallKubernetesServices" -IsClearTaskName $true
 
     Write-Log "Disable Internet Explorer compat mode and set homepage"
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.SetExplorer" -EventMessage "Start to disable Internet Explorer compat mode and set homepage"
     Set-Explorer
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.SetExplorer" -IsClearTaskName $true
 
     Write-Log "Adjust pagefile size"
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.AdjustPageFileSize" -EventMessage "Start to adjust pagefile size"
     Adjust-PageFileSize
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.AdjustPageFileSize" -IsClearTaskName $true
 
     Write-Log "Start preProvisioning script"
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.PreprovisionExtension" -EventMessage "Start preProvisioning script"
     PREPROVISION_EXTENSION
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.PreprovisionExtension" -IsClearTaskName $true
 
     Write-Log "Update service failure actions"
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.UpdateServiceFailureActions" -EventMessage "Staret to update service failure actions"
     Update-ServiceFailureActions
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.UpdateServiceFailureActions" -IsClearTaskName $true
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.AdjustDynamicPortRange" -EventMessage "Start to adjust dynamic port range"
     Adjust-DynamicPortRange
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.AdjustDynamicPortRange" -IsClearTaskName $true
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.RegisterLogsCleanupScriptTask" -EventMessage "Start to register logs cleanup script task"
     Register-LogsCleanupScriptTask
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.RegisterLogsCleanupScriptTask" -IsClearTaskName $true
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.RegisterNodeResetScriptTask" -EventMessage "Start to register node reset script task. HNSRemediatorIntervalInMinutes: $global:HNSRemediatorIntervalInMinutes"
     Register-NodeResetScriptTask
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.RegisterNodeResetScriptTask" -IsClearTaskName $true
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.UpdateDefenderPreferences" -EventMessage "Start to update defender preferences"
     Update-DefenderPreferences
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.UpdateDefenderPreferences" -IsClearTaskName $true
 
 
     $windowsVersion = Get-WindowsVersion
@@ -7769,6 +7840,7 @@ try
         Write-Log "Skip secure TLS protocols for Windows version: $windowsVersion"
     } else {
         Write-Log "Enable secure TLS protocols"
+        Logs-To-Start-Event -TaskName "AKS.WindowsCSE.EnableSecureTLS" -EventMessage "Start to enable secure TLS protocols"
         try {
             . C:\k\windowssecuretls.ps1
             Enable-SecureTls
@@ -7776,22 +7848,29 @@ try
         catch {
             Set-ExitCode -ExitCode $global:WINDOWS_CSE_ERROR_ENABLE_SECURE_TLS -ErrorMessage $_
         }
+        Logs-To-End-Event -TaskName "AKS.WindowsCSE.EnableSecureTLS" -IsClearTaskName $true
     }
 
     Enable-FIPSMode -FipsEnabled $fipsEnabled
     if ($global:WindowsGmsaPackageUrl) {
         Write-Log "Start to install Windows gmsa package"
+        Logs-To-Start-Event -TaskName "AKS.WindowsCSE.InstallGmsaPlugin" -EventMessage "Start to install Windows gmsa package. WindowsGmsaPackageUrl: $global:WindowsGmsaPackageUrl"
         Install-GmsaPlugin -GmsaPackageUrl $global:WindowsGmsaPackageUrl
+        Logs-To-End-Event -TaskName "AKS.WindowsCSE.InstallGmsaPlugin" -IsClearTaskName $true
     }
 
     Check-APIServerConnectivity -MasterIP $MasterIP
 
     if ($global:WindowsCalicoPackageURL) {
         Write-Log "Start calico installation"
+        Logs-To-Start-Event -TaskName "AKS.WindowsCSE.InstallCalico" -EventMessage "Start calico installation. WindowsCalicoPackageURL: $global:WindowsCalicoPackageURL"
         Start-InstallCalico -RootDir "c:\" -KubeServiceCIDR $global:KubeServiceCIDR -KubeDnsServiceIp $KubeDnsServiceIp
+        Logs-To-End-Event -TaskName "AKS.WindowsCSE.InstallCalico" -IsClearTaskName $true
     }
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.InstallGPUDriver" -EventMessage "Start to install GPU driver. ConfigGPUDriverIfNeeded: $global:ConfigGPUDriverIfNeeded, GpuDriverURL: $global:GpuDriverURL"
     Start-InstallGPUDriver -EnableInstall $global:ConfigGPUDriverIfNeeded -GpuDriverURL $global:GpuDriverURL
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.InstallGPUDriver" -IsClearTaskName $true
 
     if (Test-Path $CacheDir)
     {
@@ -7805,9 +7884,12 @@ try
         Remove-Item $kubeConfigFile
     }
 
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.EnableGuestVMLogs" -EventMessage "Start to enable Guest VM Logs. LogGeneratorIntervalInMinutes: $LogGeneratorIntervalInMinutes"
     Enable-GuestVMLogs -IntervalInMinutes $global:LogGeneratorIntervalInMinutes
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.EnableGuestVMLogs" -IsClearTaskName $true
 
     Write-Log "Setup Complete, starting NodeResetScriptTask to register Winodws node without reboot"
+    Logs-To-Start-Event -TaskName "AKS.WindowsCSE.StartScheduledTask" -EventMessage "Start NodeResetScriptTask to register Winodws node without reboot"
     Start-ScheduledTask -TaskName "k8s-restart-job"
 
     $timeout = 180 ##  seconds
@@ -7824,6 +7906,8 @@ try
     $timer.Stop()
     Write-Log -Message "We waited [$($timer.Elapsed.TotalSeconds)] seconds on NodeResetScriptTask"
 
+    Logs-To-End-Event -TaskName "AKS.WindowsCSE.StartScheduledTask" -IsClearTaskName $true
+
     if ($global:RebootNeeded -eq $true) {
         Postpone-RestartComputer
     }
@@ -7838,12 +7922,30 @@ finally
 {
     # Generate CSE result so it can be returned as the CSE response in csecmd.ps1
     $ExecutionDuration=$(New-Timespan -Start $StartTime -End $(Get-Date))
+    $cseFormattedEndTime=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff")
+    $eventsFileName=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+
     Write-Log "CSE ExecutionDuration: $ExecutionDuration"
 
     # Windows CSE does not return any error message so we cannot generate below content as the response
     # $JsonString = "ExitCode: `+"`"+`"{0}`+"`"+`", Output: `+"`"+`"{1}`+"`"+`", Error: `+"`"+`"{2}`+"`"+`", ExecDuration: `+"`"+`"{3}`+"`"+`"" -f $global:ExitCode, "", $global:ErrorMessage, $ExecutionDuration.TotalSeconds
     Write-Log "Generate CSE result to $CSEResultFilePath : $global:ExitCode"
     echo $global:ExitCode | Out-File -FilePath $CSEResultFilePath -Encoding utf8
+
+    $messageString="ExitCode: $global:ExitCode, ExecutionDuration: $ExecutionDuration, FinalTask: $global:EventTaskName";
+    $eventJson=@"
+    {
+        "Timestamp": "$cseFormattedStartTime",
+        "OperationId": "$global:OperationId",
+        "Version": "1.10",
+        "TaskName": "AKS.WindowsCSE.cse_start",
+        "EventLevel": "Informational",
+        "Message": "$messageString",
+        "EventPid": "0",
+        "EventTid": "0"
+}
+"@
+    echo $eventJson | Set-Content ${global:EventsLoggingDir}${eventsFileName}.json
 
     # Flush stdout to C:\AzureData\CustomDataSetupScript.log
     [Console]::Out.Flush()
@@ -7997,6 +8099,10 @@ $global:StableContainerdPackage = "v1.6.21-azure.1/binaries/containerd-v1.6.21-a
 # The latest containerd version
 $global:LatestContainerdPackage = "v1.7.9-azure.1/binaries/containerd-v1.7.9-azure.1-windows-amd64.tar.gz"
 
+$global:EventsLoggingDir = "C:\WindowsAzure\Logs\Plugins\Microsoft.Compute.CustomScriptExtension\Events\"
+$global:EventTaskName = ""
+$global:TestLoggingDir = "C:\AzureData\"
+
 
 # This filter removes null characters (\0) which are captured in nssm.exe output when logged through powershell
 filter RemoveNulls { $_ -replace '\0', '' }
@@ -8077,6 +8183,7 @@ function Set-ExitCode
     Write-Log "Set ExitCode to $ExitCode and exit. Error: $ErrorMessage"
     $global:ExitCode=$ExitCode
     $global:ErrorMessage=$ErrorMessage
+    Logs-To-End-Event -TaskName $global:EventTaskName -IsClearTaskName $false
     exit $ExitCode
 }
 
@@ -8252,7 +8359,78 @@ function Install-Containerd-Based-On-Kubernetes-Version {
     }
     $ContainerdUrl = $ContainerdUrl + $containerdPackage
   }
+  Logs-To-Start-Event -TaskName "AKS.WindowsCSE.InstallContainerd" -EventMessage "Start to install ContainerD. ContainerdUrl: $ContainerdUrl"
   Install-Containerd -ContainerdUrl $ContainerdUrl -CNIBinDir $CNIBinDir -CNIConfDir $CNIConfDir -KubeDir $KubeDir
+  Logs-To-End-Event -TaskName "AKS.WindowsCSE.InstallContainerd" -IsClearTaskName $true
+}
+
+function Logs-To-Start-Event {
+    Param(
+        [Parameter(Mandatory = $true)][string]
+        $TaskName,
+        [Parameter(Mandatory = $true)][string]
+        $EventMessage
+    )
+
+    $global:EventTaskName = $TaskName
+    $eventsFileName=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+
+    $currentTime=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff")
+
+    $jsonString = @"
+    {
+        "Timestamp": "$currentTime",
+        "OperationId": "$global:OperationId",
+        "Version": "1.10",
+        "TaskName": "$global:EventTaskName",
+        "EventLevel": "Informational",
+        "Message": "$EventMessage",
+        "EventPid": "0",
+        "EventTid": "0"
+    }
+"@
+    Write-Log "Inject start log of $global:EventTaskName"
+    echo $jsonString | Set-Content ${EventsLoggingDir}${eventsFileName}.json
+}
+
+function Logs-To-End-Event {
+    Param(
+        [Parameter(Mandatory = $true)][string]
+        $TaskName,
+        [Parameter(Mandatory = $true)][bool]
+        $IsClearTaskName
+    )
+
+    $eventsFileName=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+
+    $currentTime=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff")
+
+    $eventLevel="Informational"
+    if ($global:ExitCode -ne 0) {
+        $eventLevel="Error"
+    }
+    
+    $endMessage = "ExitCode: $global:ExitCode. ErrorMessage: $global:ErrorMessage."
+    $endMessage = (echo $endMessage | ConvertTo-Json)
+    $jsonString = @"
+    {
+        "Timestamp": "$currentTime",
+        "OperationId": "$global:OperationId",
+        "Version": "1.10",
+        "TaskName": "$global:EventTaskName",
+        "EventLevel": "$eventLevel",
+        "Message": $endMessage,
+        "EventPid": "0",
+        "EventTid": "0"
+    }
+"@
+
+    Write-Log "Inject end log of $global:EventTaskName"
+    echo $jsonString | Set-Content ${EventsLoggingDir}${eventsFileName}.json
+
+    if ($IsClearTaskName) {
+        $global:EventTaskName = ""
+    }
 }`)
 
 func windowsWindowscsehelperPs1Bytes() ([]byte, error) {

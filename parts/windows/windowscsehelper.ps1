@@ -71,6 +71,10 @@ $global:StableContainerdPackage = "v1.6.21-azure.1/binaries/containerd-v1.6.21-a
 # The latest containerd version
 $global:LatestContainerdPackage = "v1.7.9-azure.1/binaries/containerd-v1.7.9-azure.1-windows-amd64.tar.gz"
 
+$global:EventsLoggingDir = "C:\WindowsAzure\Logs\Plugins\Microsoft.Compute.CustomScriptExtension\Events\"
+$global:EventTaskName = ""
+$global:TestLoggingDir = "C:\AzureData\"
+
 
 # This filter removes null characters (\0) which are captured in nssm.exe output when logged through powershell
 filter RemoveNulls { $_ -replace '\0', '' }
@@ -151,6 +155,7 @@ function Set-ExitCode
     Write-Log "Set ExitCode to $ExitCode and exit. Error: $ErrorMessage"
     $global:ExitCode=$ExitCode
     $global:ErrorMessage=$ErrorMessage
+    Logs-To-End-Event -TaskName $global:EventTaskName -IsClearTaskName $false
     exit $ExitCode
 }
 
@@ -326,5 +331,76 @@ function Install-Containerd-Based-On-Kubernetes-Version {
     }
     $ContainerdUrl = $ContainerdUrl + $containerdPackage
   }
+  Logs-To-Start-Event -TaskName "AKS.WindowsCSE.InstallContainerd" -EventMessage "Start to install ContainerD. ContainerdUrl: $ContainerdUrl"
   Install-Containerd -ContainerdUrl $ContainerdUrl -CNIBinDir $CNIBinDir -CNIConfDir $CNIConfDir -KubeDir $KubeDir
+  Logs-To-End-Event -TaskName "AKS.WindowsCSE.InstallContainerd" -IsClearTaskName $true
+}
+
+function Logs-To-Start-Event {
+    Param(
+        [Parameter(Mandatory = $true)][string]
+        $TaskName,
+        [Parameter(Mandatory = $true)][string]
+        $EventMessage
+    )
+
+    $global:EventTaskName = $TaskName
+    $eventsFileName=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+
+    $currentTime=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff")
+
+    $jsonString = @"
+    {
+        "Timestamp": "$currentTime",
+        "OperationId": "$global:OperationId",
+        "Version": "1.10",
+        "TaskName": "$global:EventTaskName",
+        "EventLevel": "Informational",
+        "Message": "$EventMessage",
+        "EventPid": "0",
+        "EventTid": "0"
+    }
+"@
+    Write-Log "Inject start log of $global:EventTaskName"
+    echo $jsonString | Set-Content ${EventsLoggingDir}${eventsFileName}.json
+}
+
+function Logs-To-End-Event {
+    Param(
+        [Parameter(Mandatory = $true)][string]
+        $TaskName,
+        [Parameter(Mandatory = $true)][bool]
+        $IsClearTaskName
+    )
+
+    $eventsFileName=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+
+    $currentTime=$(Get-Date -Format "yyyy-MM-dd HH:mm:ss.fff")
+
+    $eventLevel="Informational"
+    if ($global:ExitCode -ne 0) {
+        $eventLevel="Error"
+    }
+    
+    $endMessage = "ExitCode: $global:ExitCode. ErrorMessage: $global:ErrorMessage."
+    $endMessage = (echo $endMessage | ConvertTo-Json)
+    $jsonString = @"
+    {
+        "Timestamp": "$currentTime",
+        "OperationId": "$global:OperationId",
+        "Version": "1.10",
+        "TaskName": "$global:EventTaskName",
+        "EventLevel": "$eventLevel",
+        "Message": $endMessage,
+        "EventPid": "0",
+        "EventTid": "0"
+    }
+"@
+
+    Write-Log "Inject end log of $global:EventTaskName"
+    echo $jsonString | Set-Content ${EventsLoggingDir}${eventsFileName}.json
+
+    if ($IsClearTaskName) {
+        $global:EventTaskName = ""
+    }
 }

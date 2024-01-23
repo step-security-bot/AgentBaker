@@ -8390,7 +8390,7 @@ function Logs-To-Start-Event {
     }
 "@
     Write-Log "Inject start log of $global:EventTaskName"
-    echo $jsonString | Set-Content ${EventsLoggingDir}${eventsFileName}.json
+    echo $jsonString | Set-Content ${global:EventsLoggingDir}${eventsFileName}.json
 }
 
 function Logs-To-End-Event {
@@ -8426,7 +8426,7 @@ function Logs-To-End-Event {
 "@
 
     Write-Log "Inject end log of $global:EventTaskName"
-    echo $jsonString | Set-Content ${EventsLoggingDir}${eventsFileName}.json
+    echo $jsonString | Set-Content ${global:EventsLoggingDir}${eventsFileName}.json
 
     if ($IsClearTaskName) {
         $global:EventTaskName = ""

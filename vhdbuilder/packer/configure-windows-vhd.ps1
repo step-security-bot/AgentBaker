@@ -232,6 +232,26 @@ function Get-PrivatePackagesToCacheOnVHD {
     }
 }
 
+function Get-ToolsToVHD {
+    $cacheDir = "c:\toolscache"
+    if (!(Test-Path -Path $cacheDir)) {
+        New-Item -ItemType Directory -Path $cacheDir | Out-Null
+    }
+
+    $toolsDir = "c:\tools" # discuss
+    if (!(Test-Path -Path $toolsDir)) {
+        New-Item -ItemType Directory -Path $toolsDir | Out-Null
+    }
+
+    Write-Log "Caching du.exe"
+    $URL = "https://download.sysinternals.com/files/DU.zip"
+    DownloadFileWithRetry -URL $URL -Dest "$cacheDir\DU.zip"
+    Expand-Archive -Path "$cacheDir\DU.zip" -DestinationPath "$cacheDir\DU"
+    Copy-Item -Path "$cacheDir\DU\du.exe" -Destination "$toolsDir\du.exe"
+
+    Remove-Item -Path $cacheDir -Recurse -Force
+}
+
 function Install-ContainerD {
     # installing containerd during VHD building is to cache container images into the VHD,
     # and the containerd to managed customer containers after provisioning the vm is not necessary
@@ -814,6 +834,7 @@ try{
             Get-ContainerImages
             Get-FilesToCacheOnVHD
             Get-PrivatePackagesToCacheOnVHD
+            Get-ToolsToVHD
             Remove-Item -Path c:\windows-vhd-configuration.ps1
             (New-Guid).Guid | Out-File -FilePath 'c:\vhd-id.txt'
             Log-ReofferUpdate
